@@ -14,11 +14,30 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Send Event to API
+        env:
+          EVENT_CONTEXT: ${{ toJson(github.event) }}
         run: |
+          # 1. Filter the raw event to only the fields we need
+          echo "$EVENT_CONTEXT" | jq -c '{
+            action: .action,
+            repository: { name: .repository.name },
+            issue: {
+              number: .issue.number,
+              title: .issue.title,
+              html_url: .issue.html_url,
+              body: .issue.body
+            },
+            comment: (if .comment then { body: .comment.body } else null end),
+            label: (if .label then { name: .label.name } else null end),
+            sender: { type: .sender.type }
+          }' > filtered_payload.json
+
+          # 2. Build the final request object
+          jq -n --arg ev "${{ github.event_name }}" --slurpfile pl filtered_payload.json \
+            '{event: $ev, payload: $pl[0]}' > request.json
+
+          # 3. Securely POST to API
           curl --fail -s -X POST "${{ secrets.GATEWAY_ENDPOINT }}/internal/dispatch-notification" \
             -H "Authorization: Bearer ${{ secrets.GATEWAY_TOKEN }}" \
             -H "Content-Type: application/json" \
-            -d "{
-              \"event\": \"${{ github.event_name }}\",
-              \"payload\": ${{ toJson(github.event) }}
-            }"
+            -d @request.json
