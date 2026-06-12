@@ -17,7 +17,7 @@ jobs:
         env:
           EVENT_CONTEXT: ${{ toJson(github.event) }}
         run: |
-          # 1. Filter the raw event to only the fields we need
+          # 1. Filter the raw event
           echo "$EVENT_CONTEXT" | jq -c '{
             action: .action,
             repository: { name: .repository.name },
@@ -32,12 +32,21 @@ jobs:
             sender: { type: .sender.type }
           }' > filtered_payload.json
 
-          # 2. Build the final request object
+          # 2. Build request
           jq -n --arg ev "${{ github.event_name }}" --slurpfile pl filtered_payload.json \
             '{event: $ev, payload: $pl[0]}' > request.json
 
-          # 3. Securely POST to API
-          curl --fail -s -X POST "${{ secrets.GATEWAY_ENDPOINT }}/internal/dispatch-notification" \
+          # 3. POST with Error Capture
+          # We use -w to capture status and -o to capture body
+          STATUS=$(curl -s -o response_body.txt -w "%{http_code}" -X POST "${{ secrets.GATEWAY_ENDPOINT }}/internal/dispatch-notification" \
             -H "Authorization: Bearer ${{ secrets.GATEWAY_TOKEN }}" \
             -H "Content-Type: application/json" \
-            -d @request.json
+            -d @request.json)
+
+          if [ "$STATUS" -ge 400 ]; then
+            echo "Error: API returned status $STATUS"
+            cat response_body.txt
+            exit 1
+          fi
+
+          echo "Success: Notification dispatched."
