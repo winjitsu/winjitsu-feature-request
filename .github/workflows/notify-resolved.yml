@@ -1,16 +1,16 @@
-name: Notify Customer on Comment
+name: Notify Customer on Feature Shipment
 
 on:
-  issue_comment:
-    types: [created]
+  issues:
+    types: [labeled, closed]
 
 jobs:
   notify:
-    # Only notify if the comment is NOT a "private note" and NOT from a bot
     if: |
-      github.event.comment.user.type != 'Bot' &&
-      !startsWith(github.event.comment.body, '/note')
+      (github.event.action == 'labeled' && github.event.label.name == 'shipped') ||
+      (github.event.action == 'closed')
     runs-on: ubuntu-latest
+
     steps:
       - name: Fetch Decrypted Metadata from Vault
         id: metadata
@@ -45,22 +45,23 @@ jobs:
           echo "customer_email=$EMAIL" >> $GITHUB_OUTPUT
           echo "customer_name=$NAME" >> $GITHUB_OUTPUT
 
-      - name: Send update email via SMTP2GO
+      - name: Send shipment email via SMTP2GO
         if: steps.metadata.outputs.customer_email != ''
         env:
           CUSTOMER_NAME: ${{ steps.metadata.outputs.customer_name }}
           CUSTOMER_EMAIL: ${{ steps.metadata.outputs.customer_email }}
-          COMMENT_BODY: ${{ github.event.comment.body }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
           CURRENT_YEAR=$(date +'%Y')
-
+          
           # 1. Build the HTML body
           HTML_BODY=$(cat <<HTML
           <!DOCTYPE html>
           <html lang="en"><head><meta charset="UTF-8">
           <meta name="viewport" content="width=device-width,initial-scale=1">
-          <title>Update on Feature Request</title></head>
+          <title>Feature Request Shipped</title></head>
           <body style="margin:0;padding:0;background:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif">
             <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:40px 0">
               <tr><td align="center">
@@ -69,15 +70,20 @@ jobs:
                     <img src="https://winjitsu.app/images/logo.png" alt="Winjitsu" width="120" style="display:block;margin:0 auto" />
                   </td></tr>
                   <tr><td style="padding:36px 40px 24px">
-                    <h1 style="margin:0 0 8px;font-size:20px;font-weight:600;color:#0f172a">Update on your feature request</h1>
-                    <p style="margin:0 0 24px;font-size:14px;color:#64748b">Hi ${CUSTOMER_NAME}, there is an update on your request.</p>
+                    <h1 style="margin:0 0 8px;font-size:20px;font-weight:600;color:#0f172a">Great news: Your feature is live!</h1>
+                    <p style="margin:0 0 24px;font-size:14px;color:#64748b">Hi ${CUSTOMER_NAME}, we've officially shipped the feature you requested.</p>
                     <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;margin-bottom:28px">
                       <tr><td style="padding:16px 20px">
-                        <p style="margin:0 0 4px;font-size:11px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em">Update from team</p>
-                        <div style="margin:0;font-size:14px;line-height:1.6;color:#0f172a;white-space:pre-wrap">${COMMENT_BODY}</div>
+                        <p style="margin:0 0 4px;font-size:11px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em">Implemented feature</p>
+                        <p style="margin:0;font-size:14px;font-weight:500;color:#0f172a">${ISSUE_TITLE}</p>
                       </td></tr>
                     </table>
-                    <p style="margin:0;font-size:14px;color:#475569">You can track progress on the public roadmap or reply to this email.</p>
+                    <table cellpadding="0" cellspacing="0" style="margin-bottom:28px">
+                      <tr><td style="background:#0f172a;border-radius:6px">
+                        <a href="https://winjitsu.app/release-notes" style="display:inline-block;padding:12px 24px;font-size:14px;font-weight:500;color:#ffffff;text-decoration:none">View Release Notes &rarr;</a>
+                      </td></tr>
+                    </table>
+                    <p style="margin:0;font-size:14px;color:#475569">Thank you for helping us make Winjitsu better. Keep the ideas coming!</p>
                   </td></tr>
                   <tr><td style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:20px 40px;text-align:center">
                     <p style="margin:0;font-size:12px;color:#94a3b8">&copy; ${CURRENT_YEAR} Winjitsu &nbsp;&bull;&nbsp; <a href="https://winjitsu.app/privacy" style="color:#94a3b8">Privacy Policy</a></p>
@@ -92,22 +98,20 @@ jobs:
           # 2. Build the text body
           TEXT_BODY=$(cat <<TEXT
           Hi ${CUSTOMER_NAME},
-          There is an update on your Winjitsu feature request (#${ISSUE_NUMBER}).
-          MESSAGE:
-          ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-          ${COMMENT_BODY}
-          ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-          You can track progress on the public roadmap or reply to this email.
+          Great news: We have officially shipped the Winjitsu feature you requested!
+          Feature: ${ISSUE_TITLE}
+          Link:    ${ISSUE_URL}
+          Thank you for helping us make Winjitsu better. You can view the latest release notes at https://winjitsu.app/release-notes
           — Winjitsu Support
           TEXT
           )
 
-          # 3. Combine into JSON payload using jq --arg
+          # 3. Combine into JSON payload
           PAYLOAD=$(jq -n \
             --arg api_key "${{ secrets.SMTP2GO_API_KEY }}" \
             --arg to      "$CUSTOMER_EMAIL" \
             --arg sender  "${{ secrets.EMAIL_FROM_ADDRESS }}" \
-            --arg subject "Update on your feature request (#${ISSUE_NUMBER})" \
+            --arg subject "Good news: We shipped your feature request! (#${ISSUE_NUMBER})" \
             --arg html    "$HTML_BODY" \
             --arg text    "$TEXT_BODY" \
             '{api_key: $api_key, to: [$to], sender: $sender, subject: $subject, html_body: $html, text_body: $text}')
