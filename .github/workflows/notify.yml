@@ -1,0 +1,24 @@
+name: Notify Customer
+
+on:
+  issues:
+    types: [labeled, closed]
+  issue_comment:
+    types: [created]
+
+jobs:
+  dispatch:
+    if: |
+      (github.event_name == 'issue_comment' && github.event.comment.user.type != 'Bot' && !startsWith(github.event.comment.body, '/note')) ||
+      (github.event_name == 'issues' && github.event.sender.type != 'Bot')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Event to API
+        run: |
+          curl --fail -s -X POST "${{ secrets.GATEWAY_ENDPOINT }}/internal/dispatch-notification" \
+            -H "Authorization: Bearer ${{ secrets.GATEWAY_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"event\": \"${{ github.event_name }}\",
+              \"payload\": ${{ toJson(github.event) }}
+            }"
