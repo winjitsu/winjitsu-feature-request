@@ -38,7 +38,7 @@ jobs:
 
           # 3. POST with Error Capture
           # We use -w to capture status and -o to capture body
-          STATUS=$(curl -s -o response_body.txt -w "%{http_code}" -X POST "${{ secrets.GATEWAY_ENDPOINT }}/internal/dispatch-notification" \
+          STATUS=$(curl -s -o response_body.txt -w "%{http_code}" -X POST "${{ secrets.GATEWAY_ENDPOINT }}/support/dispatch" \
             -H "Authorization: Bearer ${{ secrets.GATEWAY_TOKEN }}" \
             -H "Content-Type: application/json" \
             -d @request.json)
